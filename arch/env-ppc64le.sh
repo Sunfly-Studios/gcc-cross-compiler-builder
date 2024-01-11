@@ -1,6 +1,3 @@
-# Sourceable xtraction of environment variables so you can continue working in a shell for manual labour.
-# vi: ft=sh
-
 # Cross variables.
 export HOST="$MACHTYPE"
 export BUILD="$HOST"

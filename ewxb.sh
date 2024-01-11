@@ -23,7 +23,46 @@ log () {
 	printf "%s ${fmt}\n" "|>" "$@"
 }
 
-source x_environment.sh
+ARCH_DIR="./arch"
+
+if [ ! -d "$ARCH_DIR" ]; then
+    echo "Architecture directory not found!"
+    exit 1
+fi
+
+# Array to hold configuration files
+config_files=()
+
+echo "Available architecture configurations:"
+i=1
+for config_file in "$ARCH_DIR"/config-*.sh; do
+    if [ -f "$config_file" ]; then
+        echo "$i) $(basename "$config_file")"
+        config_files[i]="$config_file"
+        ((i++))
+    fi
+done
+
+if [ ${#config_files[@]} -eq 0 ]; then
+    echo "No configuration files found in $ARCH_DIR"
+    exit 1
+fi
+
+read -p "Enter the number of the configuration to build: " -r selection
+
+if [ -z "${config_files[$selection]}" ]; then
+    echo "Invalid selection"
+    exit 1
+fi
+
+selected_config="${config_files[$selection]}"
+echo "Building with configuration: $(basename "$selected_config")"
+read -p "Are you sure this is the configuration? (Y/y/N/n) " confirm
+case $confirm in
+  [Yy] ) source "$selected_config";;
+  [Nn] ) exit;;
+	* ) source "$selected_config";;
+esac
 
 
 # Log stdout and stderr.
@@ -76,8 +115,18 @@ phase_0() {
 		log "Downloading $BINUTILSV.tar.gz..."
 		wget http://ftp.gnu.org/gnu/binutils/$BINUTILSV.tar.gz
 	fi
+
+	if ! [ -f "$TEXINFOV.tar.gz" ]; then
+		log "Downloading $TEXINFOV.tar.gz..."
+		wget http://ftp.gnu.org/gnu/texinfo/$TEXINFOV.tar.gz
+	fi
+	
 	if ! [ -d "$BINUTILSV" ]; then
 		tar xvzf $BINUTILSV.tar.gz
+	fi
+	
+	if ! [ -d "$TEXINFOV" ]; then
+		tar xvzf $TEXINFOV.tar.gz
 	fi
 
 	if [ "$GCCV"  == "gccgo" ]; then
@@ -91,10 +140,10 @@ phase_0() {
 	else
 		if ! [ -f "$GCCV.tar.bz2" ]; then
 			log "Downloading $GCCV.tar.bz2..."
-			wget http://ftp.gnu.org/gnu/gcc/$GCCV/$GCCV.tar.bz2
+			wget ftp://gcc.gnu.org/pub/gcc/releases/$GCCV/$GCCV.tar.gz
 		fi
 		if ! [ -d "$GCCV" ]; then
-			tar xvjf $GCCV.tar.bz2
+			tar xfk $GCCV.tar.gz
 			cd $GCCV
 			contrib/download_prerequisites
 			cd $SRC
@@ -106,18 +155,18 @@ phase_0() {
 		wget http://ftp.gnu.org/gnu/glibc/$GLIBCV.tar.bz2
 	fi
 	if ! [ -d "$GLIBCV" ]; then
-		tar xvjf $GLIBCV.tar.bz2
+		tar xfk $GLIBCV.tar.bz2
 	fi
 
 	if glibc_needs_port_pkg; then
 		cd $GLIBCV
-		glibcport="glibc-ports-$GLIBCVNO"
+		glibcport="glibc-$GLIBCVNO"
 		if ! [ -f "$glibcport.tar.bz2" ]; then
 			log "Fetching ports extension $glibcport.tar.bz2"
 			wget http://ftp.gnu.org/gnu/glibc/$glibcport.tar.bz2
 		fi
 		if ! [ -d "$glibcport" ]; then
-			tar xvjf $glibcport.tar.bz2
+			tar xfk $glibcport.tar.bz2
 			ln -s $glibcport ports
 		fi
 		cd ..
@@ -133,10 +182,20 @@ phase_0() {
 
 }
 
-phases+=(["1"]="binutils")
+phases+=(["1"]="binutils and texinfo")
 phase_1() {
-	log "Building cross-compiling binutils."
+	log "Building texinfo and cross-compiling binutils."
 
+	setup_and_enter_dir "$OBJ/texinfo"
+	
+	$SRC/$TEXINFOV/configure \
+		--prefix=$TOOLS \
+	  	--build=$MACHTYPE \
+	  	--host=$TARGET
+
+	make $PARALLEL_MAKE
+	make install
+	
 	setup_and_enter_dir "$OBJ/binutils"
 
 	$SRC/$BINUTILSV/configure \
@@ -144,8 +203,8 @@ phase_1() {
 		--target=$TARGET \
 		--with-sysroot=$SYSROOT
 
-	make
-	make install
+	make $PARALLEL_MAKE
+	make $PARALLEL_MAKE install
 }
 
 phases+=(["2"]="gcc1")
@@ -172,8 +231,8 @@ phase_2() {
 		--disable-libquadmath \
 		--disable-libquadmath-support
 
-	PATH="$TOOLS/bin:$PATH" make all-gcc
-	PATH="$TOOLS/bin:$PATH" make install-gcc
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc
 }
 
 phases+=(["3"]="linux headers")
@@ -185,7 +244,7 @@ phase_3() {
 	cd $OBJ/$LINUXV
 
 	make clean
-	make headers_install \
+	make $PARALLEL_MAKE headers_install \
 		ARCH=$LINUX_ARCH \
 		CROSS_COMPILE=$TARGET \
 		INSTALL_HDR_PATH=$SYSROOT/usr
@@ -215,6 +274,7 @@ phase_4() {
 		--build=$BUILD \
 		--host=$TARGET \
 		--with-headers=$SYSROOT/usr/include \
+		--disable-werror \
 		--with-binutils=$TOOLS/$TARGET/bin \
 		$addons \
 		--enable-kernel="${LINUXV##*-}" \
@@ -228,10 +288,10 @@ phase_4() {
 		libc_cv_forced_unwind=yes \
 		libc_cv_c_cleanup=yes
 
-	make install-headers install_root=$SYSROOT
+	make $PARALLEL_MAKE install-headers install_root=$SYSROOT
 
 	mkdir -p $SYSROOT/usr/lib
-	make csu/subdir_lib
+	make $PARALLEL_MAKE csu/subdir_lib
 	cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib
 
 	if [ "$GLIBCVNO" == "2.15" ]; then # At least 2.19 does this with install-headers target it self.
@@ -272,8 +332,8 @@ phase_5() {
 		--disable-libquadmath-support \
 		--disable-libatomic \
 
-	PATH="$TOOLS/bin:$PATH" make
-	PATH="$TOOLS/bin:$PATH" make install
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
 }
 
 phases+=(["6"]="glibc full")
@@ -307,13 +367,15 @@ phase_6() {
 		--disable-profile \
 		--without-gd \
 		--without-cvs \
+		--disable-werror \
+		--with-binutils=$TOOLS/$TARGET/bin \
 		$addons \
 		--enable-kernel="${LINUXV##*-}" \
 		libc_cv_forced_unwind=yes \
 		$extra_lib_cv
 
-	PATH="$TOOLS/bin:$PATH" make
-	PATH="$TOOLS/bin:$PATH" make install install_root=$SYSROOT
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install install_root=$SYSROOT
 
 	export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_old"
 }
@@ -330,7 +392,7 @@ phase_7() {
 		--build=$BUILD \
 		--host=$HOST \
 		--with-sysroot=$SYSROOT \
-		--enable-languages=c,c++,go \
+		--enable-languages=c,c++ \
 		--disable-libssp \
 		--disable-libgomp \
 		--disable-libmudflap \
@@ -342,13 +404,16 @@ phase_7() {
 		--with-cloog=no \
 		--with-libelf=no
 
-	PATH="$TOOLS/bin:$PATH" make
-	PATH="$TOOLS/bin:$PATH" make install
-
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
+	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
+	
 	cd $TOOLS/bin
 	for file in $(find . -type f); do
 		tool_name=$(echo $file | sed -e "s/${TARGET}-\(.*\)$/\1/")
-		ln -sf "$file" "$tool_name"
+		
+		if [ "$file" != "$tool_name" ]; then
+			ln -sf "$file" "$tool_name"
+		fi
 	done
 }
 
@@ -370,30 +435,30 @@ phase_8() {
 	}
 	EOF
 
-	PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -Werror -static -o helloc ./helloc.c
+	PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -static -o helloc ./helloc.c
 	log "RUN MANUALLY: Produced test-binary at: $test_path/helloc"
 
 
-	log "Testing to compile a Go program."
+	#log "Testing to compile a Go program."
 
-	cat <<- EOF > hellogo.go
-	package main
+	#cat <<- EOF > hellogo.go
+	#package main
 
-	import (
-		"fmt"
-	)
+	#import (
+	#	"fmt"
+	#)
 
-	func main() {
-		fmt.Printf("%s\n", "Hello, Gopher!")
-	}
-	EOF
+	#func main() {
+	#	fmt.Printf("%s\n", "Hello, Gopher!")
+	#}
+	#EOF
 
 	# TODO enable when mgo is built
 	#PATH="$TOOLS/bin:$PATH" go build -compiler gccgo ./hellogo.go
 	#log "RUN MANUALLY: Produced test-binary at: $test_path/hellogo"
 
 	log "Access compiler tools: $ export PATH=\"$TOOLS/bin:\$PATH\""
-	log "Run dynamically linked Go programs: $ export LD_LIBRARY_PATH=\"$TOOLS/$TARGET/lib:\$LD_LIBRARY_PATH\""
+	# log "Run dynamically linked Go programs: $ export LD_LIBRARY_PATH=\"$TOOLS/$TARGET/lib:\$LD_LIBRARY_PATH\""
 }
 
 list_phases() {
@@ -476,6 +541,7 @@ parse_cmdline "$@"
 for (( phase="$phase_start"; $phase <= "$phase_stop"; phase++ )); do
 	log "$funcstars Stating phase $phase"
 	log "$phasestars ${phases["$phase"]}"
+	read -p "" -n1 -s
 	eval "phase_$phase"
 	log "$phasestars ${phases["$phase"]}"
 	log "$funcstars Completed phase $phase"
