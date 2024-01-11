@@ -73,6 +73,19 @@ exec 2> >(tee -a "$log_file" >&2)
 log "$(date "+%Y-%m-%d-%H:%M:%S") Appending stdout & stdin to: ${log_file}"
 
 
+extract_linux_version() {
+    local version=$(echo "$1" | cut -d"-" -f2)
+    local major_v=$(echo $version | cut -d"." -f1)
+
+    # Every version after 3.0 has a .x.
+    if [ "$major_v" -gt 3 ]; then
+        echo "$major_v.x"
+    else
+        # Extract the version from the 
+        # LINUXV variable (2.5, 2.6, etc)
+        echo $version | grep -oE "^[0-9]+\.[0-9]+"
+    fi
+}
 
 glibc_needs_port_pkg() {
 	[[ $GLIBCVNO =~ 2\.([3-9]|1[0-6]) ]]
@@ -174,12 +187,14 @@ phase_0() {
 
 	if ! [ -f "$LINUXV.tar.gz" ]; then
 		log "Downloading $LINUXV.tar.gz..."
-		wget https://www.kernel.org/pub/linux/kernel/v2.6/$LINUXV.tar.gz
+        version=$(extract_linux_version $LINUXV)
+
+		wget https://www.kernel.org/pub/linux/kernel/v$version/$LINUXV.tar.gz
 	fi
+
 	if ! [ -d "$LINUXV" ]; then
 		tar xvzf $LINUXV.tar.gz
 	fi
-
 }
 
 phases+=(["1"]="binutils and texinfo")
@@ -438,20 +453,19 @@ phase_8() {
 	PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -static -o helloc ./helloc.c
 	log "RUN MANUALLY: Produced test-binary at: $test_path/helloc"
 
+	# log "Testing to compile a Go program."
 
-	#log "Testing to compile a Go program."
+	# cat <<- EOF > hellogo.go
+	# package main
 
-	#cat <<- EOF > hellogo.go
-	#package main
+	# import (
+	# 	"fmt"
+	# )
 
-	#import (
-	#	"fmt"
-	#)
-
-	#func main() {
-	#	fmt.Printf("%s\n", "Hello, Gopher!")
-	#}
-	#EOF
+	# func main() {
+	# 	fmt.Printf("%s\n", "Hello, Gopher!")
+	# }
+	# EOF
 
 	# TODO enable when mgo is built
 	#PATH="$TOOLS/bin:$PATH" go build -compiler gccgo ./hellogo.go
