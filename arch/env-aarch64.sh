@@ -2,22 +2,25 @@
 # vi: ft=sh
 
 # Cross variables.
-export HOST="amd64-linux-gnu"
+export HOST="$MACHTYPE"
 export BUILD="$HOST"
-export TARGET="mipsel-unknown-linux-gnu"
-export LINUX_ARCH="mips"
+export TARGET="aarch64-linux-gnu"
+export LINUX_ARCH="arm64"
 
 # Work directories
-export CWORK="$HOME/src/${TARGET}_gcc_build"
+export CWORK="$HOME/sysroot/${TARGET}_gcc_build"
 export SRC="$CWORK/src"
 export OBJ="$CWORK/obj"
 export TOOLS="$CWORK/tools"
 export SYSROOT="$CWORK/sysroot"
+export HEADER_DIR="${CWORK}/${TARGET}"
 
 # Pkg versions
-export BINUTILSV=binutils-2.24
-export GCCV=gcc-4.9.0
-#export GCCV=gccgo
-export GLIBCV=glibc-2.19
+export BINUTILSV=binutils-2.31.1
+export GCCV=gcc-13.2.0
+export GLIBCV=glibc-2.30
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
-export LINUXV=linux-2.6.31.14
+export LINUXV=linux-5.4
+export TEXINFOV=texinfo-6.6
+
+export PARALLEL_MAKE="-j4"
