@@ -81,8 +81,6 @@ extract_linux_version() {
     if [ "$major_v" -gt 3 ]; then
         echo "$major_v.x"
     else
-        # Extract the version from the 
-        # LINUXV variable (2.5, 2.6, etc)
         echo $version | grep -oE "^[0-9]+\.[0-9]+"
     fi
 }
