@@ -553,7 +553,9 @@ parse_cmdline "$@"
 for (( phase="$phase_start"; $phase <= "$phase_stop"; phase++ )); do
 	log "$funcstars Stating phase $phase"
 	log "$phasestars ${phases["$phase"]}"
-	read -p "" -n1 -s
+	# Add a pause so that we can easly see the
+    # phase completed and phase to go next.
+    read -p "" -n1 -s
 	eval "phase_$phase"
 	log "$phasestars ${phases["$phase"]}"
 	log "$funcstars Completed phase $phase"
