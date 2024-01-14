@@ -78,7 +78,7 @@ extract_linux_version() {
     local major_v=$(echo $version | cut -d"." -f1)
 
     # Every version after 3.0 has a .x.
-    if [ "$major_v" -gt 3 ]; then
+    if [ "$major_v" -ge 3 ]; then
         echo "$major_v.x"
     else
         echo $version | grep -oE "^[0-9]+\.[0-9]+"
