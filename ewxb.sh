@@ -140,6 +140,20 @@ phase_0() {
 		tar xvzf $TEXINFOV.tar.gz
 	fi
 
+    # Optionally build make.
+    if ! [ -z "$MAKEV" ]; then
+		log "Downloading $MAKEV.tar.gz..."
+
+        if ! [ -f "$MAKEV.tar.gz" ]; then
+            log "Downloading $MAKEV.tar.gz..."
+            wget http://ftp.gnu.org/gnu/make/$MAKEV.tar.gz
+        fi
+	
+        if ! [ -d "$MAKEV" ]; then
+            tar xvzf $MAKEV.tar.gz
+        fi
+    fi
+
 	if [ "$GCCV"  == "gccgo" ]; then
 		if ! [ -d "$GCCV" ]; then
 			log "Checking out $GCCV from SVN repo..."
@@ -165,6 +179,7 @@ phase_0() {
 		log "Downloading $GLIBCV.tar.gz2..."
 		wget http://ftp.gnu.org/gnu/glibc/$GLIBCV.tar.bz2
 	fi
+
 	if ! [ -d "$GLIBCV" ]; then
 		tar xfk $GLIBCV.tar.bz2
 	fi
@@ -195,9 +210,21 @@ phase_0() {
 	fi
 }
 
-phases+=(["1"]="binutils and texinfo")
+phases+=(["1"]="binutils, texinfo and (optionally) make.")
 phase_1() {
-	log "Building texinfo and cross-compiling binutils."
+	log "Building texinfo, (optionally) make and cross-compiling binutils."
+
+    if ! [ -z "$MAKEV" ]; then
+        setup_and_enter_dir "$OBJ/make"
+
+        $SRC/$MAKEV/configure \
+            --prefix=$TOOLS \
+            --build=$MACHTYPE \
+            --host=$TARGET
+
+        make $PARALLEL_MAKE
+        make install
+    fi
 
 	setup_and_enter_dir "$OBJ/texinfo"
 	
