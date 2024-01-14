@@ -35,7 +35,7 @@ config_files=()
 
 echo "Available architecture configurations:"
 i=1
-for config_file in "$ARCH_DIR"/config-*.sh; do
+for config_file in "$ARCH_DIR"/env-*.sh; do
     if [ -f "$config_file" ]; then
         echo "$i) $(basename "$config_file")"
         config_files[i]="$config_file"
