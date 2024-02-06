@@ -13,11 +13,11 @@ export SYSROOT="$CWORK/sysroot"
 export HEADER_DIR="${CWORK}/${TARGET}"
 
 # Pkg versions
-export BINUTILSV=binutils-2.38
-export GCCV=gcc-13.2.0
-export GLIBCV=glibc-2.25
+export BINUTILSV=binutils-2.28
+export GCCV=gcc-9.5.0
+export GLIBCV=glibc-2.24
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
-export LINUXV=linux-2.6.32.5
+export LINUXV=linux-4.9
+export LINUXMIN=2.6.9
 export TEXINFOV=texinfo-6.0
-
 export PARALLEL_MAKE="-j4"

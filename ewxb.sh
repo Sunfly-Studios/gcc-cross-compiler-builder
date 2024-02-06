@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Build a GCC toolchain with Go-support from scratch.
+# Build a GCC toolchain from scratch.
 # Author: Erik Westrup <erik.westrup@gmail.com>
-# Inspired by Jim Blandy's excellent eglibc cross-compiling guide posted at eglibc's mailinglist as "[patches] Cross-building instructions", available at http://www.eglibc.org/archives/patches/msg00078.html
+# Modified by MBCX
+# Inspired by Jim Blandy's excellent eglibc cross-compiling guide posted at eglibc's 
+# mailinglist as "[patches] Cross-building instructions", available at 
+# https://web.archive.org/web/20160306041709/http://www.eglibc.org/archives/patches/msg00078.html
 
 set -e
 
@@ -26,8 +29,8 @@ log () {
 ARCH_DIR="./arch"
 
 if [ ! -d "$ARCH_DIR" ]; then
-    echo "Architecture directory not found!"
-    exit 1
+	echo "Architecture directory not found!"
+	exit 1
 fi
 
 # Array to hold configuration files
@@ -36,32 +39,32 @@ config_files=()
 echo "Available architecture configurations:"
 i=1
 for config_file in "$ARCH_DIR"/env-*.sh; do
-    if [ -f "$config_file" ]; then
-        echo "$i) $(basename "$config_file")"
-        config_files[i]="$config_file"
-        ((i++))
-    fi
+	if [ -f "$config_file" ]; then
+		echo "$i) $(basename "$config_file")"
+		config_files[i]="$config_file"
+		((i++))
+	fi
 done
 
 if [ ${#config_files[@]} -eq 0 ]; then
-    echo "No configuration files found in $ARCH_DIR"
-    exit 1
+	echo "No configuration files found in $ARCH_DIR"
+	exit 1
 fi
 
 read -p "Enter the number of the configuration to build: " -r selection
 
 if [ -z "${config_files[$selection]}" ]; then
-    echo "Invalid selection"
-    exit 1
+	echo "Invalid selection"
+	exit 1
 fi
 
 selected_config="${config_files[$selection]}"
 echo "Building with configuration: $(basename "$selected_config")"
 read -p "Are you sure this is the configuration? (Y/y/N/n) " confirm
 case $confirm in
-  [Yy] ) source "$selected_config";;
-  [Nn] ) exit;;
-	* ) source "$selected_config";;
+	[Yy]) source "$selected_config" ;;
+	[Nn]) exit 0;;
+	*) source "$selected_config" ;;
 esac
 
 
@@ -163,8 +166,8 @@ phase_0() {
 			cd $SRC
 		fi
 	else
-		if ! [ -f "$GCCV.tar.bz2" ]; then
-			log "Downloading $GCCV.tar.bz2..."
+		if ! [ -f "$GCCV.tar.gz" ]; then
+			log "Downloading $GCCV.tar.gz..."
 			wget ftp://gcc.gnu.org/pub/gcc/releases/$GCCV/$GCCV.tar.gz
 		fi
 		if ! [ -d "$GCCV" ]; then
@@ -176,7 +179,7 @@ phase_0() {
 	fi
 
 	if ! [ -f "$GLIBCV.tar.bz2" ]; then
-		log "Downloading $GLIBCV.tar.gz2..."
+		log "Downloading $GLIBCV.tar.bz2..."
 		wget http://ftp.gnu.org/gnu/glibc/$GLIBCV.tar.bz2
 	fi
 
@@ -214,17 +217,17 @@ phases+=(["1"]="binutils, texinfo and (optionally) make.")
 phase_1() {
 	log "Building texinfo, (optionally) make and cross-compiling binutils."
 
-    if ! [ -z "$MAKEV" ]; then
-        setup_and_enter_dir "$OBJ/make"
+	if ! [ -z "$MAKEV" ]; then
+		setup_and_enter_dir "$OBJ/make"
 
-        $SRC/$MAKEV/configure \
-            --prefix=$TOOLS \
-            --build=$MACHTYPE \
-            --host=$TARGET
+		$SRC/$MAKEV/configure \
+		    --prefix=$TOOLS \
+		    --build=$MACHTYPE \
+		    --host=$TARGET
 
-        make $PARALLEL_MAKE
-        make install
-    fi
+		make $PARALLEL_MAKE
+		make install
+	fi
 
 	setup_and_enter_dir "$OBJ/texinfo"
 	
@@ -253,23 +256,42 @@ phase_2() {
 
 	setup_and_enter_dir "$OBJ/gcc1"
 
-	$SRC/$GCCV/configure \
-		--prefix=$TOOLS \
-		--build=$BUILD \
-		--host=$HOST \
-		--target=$TARGET \
-		--enable-languages=c \
-		--without-headers \
-		--with-newlib \
-		--with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
-		--disable-libgcc \
-		--disable-shared \
-		--disable-threads \
-		--disable-libssp \
-		--disable-libgomp \
-		--disable-libmudflap \
-		--disable-libquadmath \
-		--disable-libquadmath-support
+	if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--build=$BUILD \
+			--host=$HOST \
+			--target=$TARGET \
+			--enable-languages=c \
+			--without-headers \
+			--with-newlib \
+			--with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
+			--disable-libgcc \
+			--disable-shared \
+			--disable-threads \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--disable-libquadmath \
+			--disable-multilib
+	else
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--build=$BUILD \
+			--host=$HOST \
+			--target=$TARGET \
+			--enable-languages=c \
+			--without-headers \
+			--with-newlib \
+			--with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
+			--disable-libgcc \
+			--disable-shared \
+			--disable-threads \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--disable-libquadmath
+	fi
 
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc
@@ -303,6 +325,7 @@ phase_4() {
 	if glibc_needs_port_pkg; then
 		addons="--enable-add-ons=nptl,ports"
 	fi
+	local linux_version=${LINUXMIN:-LINUXV##*-}
 
 	BUILD_CC=gcc \
 	CC=$TOOLS/bin/$TARGET-gcc \
@@ -317,7 +340,7 @@ phase_4() {
 		--disable-werror \
 		--with-binutils=$TOOLS/$TARGET/bin \
 		$addons \
-		--enable-kernel="${LINUXV##*-}" \
+		--enable-kernel="$linux_version" \
 		--disable-profile \
 		--without-gd \
 		--without-cvs \
@@ -328,7 +351,7 @@ phase_4() {
 		libc_cv_forced_unwind=yes \
 		libc_cv_c_cleanup=yes
 
-	make $PARALLEL_MAKE install-headers install_root=$SYSROOT
+	make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT
 
 	mkdir -p $SYSROOT/usr/lib
 	make $PARALLEL_MAKE csu/subdir_lib
@@ -351,27 +374,50 @@ phase_5() {
 
 	setup_and_enter_dir "$OBJ/gcc2"
 
-	$SRC/$GCCV/configure \
-		--prefix=$TOOLS \
-		--target=$TARGET \
-		--build=$BUILD \
-		--host=$HOST \
-		--with-sysroot=$SYSROOT \
-		--with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
-		--enable-languages=c \
-		--disable-libssp \
-		--disable-libgomp \
-		--disable-libmudflap \
-		--with-ppl=no \
-		--with-isl=no \
-		--with-cloog=no \
-		--with-libelf=no \
-		--disable-nls \
-		--disable-multilib \
-		--disable-libquadmath \
-		--disable-libquadmath-support \
-		--disable-libatomic \
-
+	if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--target=$TARGET \
+			--build=$BUILD \
+			--host=$HOST \
+			--with-sysroot=$SYSROOT \
+			--with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
+			--enable-languages=c \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--with-ppl=no \
+			--with-isl=no \
+			--with-cloog=no \
+			--with-libelf=no \
+			--disable-nls \
+			--disable-multilib \
+			--disable-libquadmath \
+			--disable-libquadmath-support \
+			--disable-libatomic \
+			--disable-multilib
+	else
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--target=$TARGET \
+			--build=$BUILD \
+			--host=$HOST \
+			--with-sysroot=$SYSROOT \
+			--with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
+			--enable-languages=c \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--with-ppl=no \
+			--with-isl=no \
+			--with-cloog=no \
+			--with-libelf=no \
+			--disable-nls \
+			--disable-multilib \
+			--disable-libquadmath \
+			--disable-libquadmath-support \
+			--disable-libatomic
+	fi
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
 }
@@ -394,6 +440,7 @@ phase_6() {
 	if [ "$GLIBCVNO" == "2.15" ]; then # The one I've noticed, 2.19 does not need for example.
 		extra_lib_cv="libc_cv_ctors_header=yes libc_cv_c_cleanup=yes"
 	fi
+	local linux_version=${LINUXMIN:-LINUXV##*-}
 
 	BUILD_CC=gcc \
 	CC=$TOOLS/bin/$TARGET-gcc \
@@ -410,7 +457,7 @@ phase_6() {
 		--disable-werror \
 		--with-binutils=$TOOLS/$TARGET/bin \
 		$addons \
-		--enable-kernel="${LINUXV##*-}" \
+		--enable-kernel="$linux_version" \
 		libc_cv_forced_unwind=yes \
 		$extra_lib_cv
 
@@ -426,24 +473,44 @@ phase_7() {
 
 	setup_and_enter_dir "$OBJ/gcc3"
 
-	$SRC/$GCCV/configure \
-		--prefix=$TOOLS \
-		--target=$TARGET \
-		--build=$BUILD \
-		--host=$HOST \
-		--with-sysroot=$SYSROOT \
-		--enable-languages=c,c++ \
-		--disable-libssp \
-		--disable-libgomp \
-		--disable-libmudflap \
-		--disable-libquadmath \
-		--disable-libquadmath-support \
-		--with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-		--with-ppl=no \
-		--with-isl=no \
-		--with-cloog=no \
-		--with-libelf=no
-
+	if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--target=$TARGET \
+			--build=$BUILD \
+			--host=$HOST \
+			--with-sysroot=$SYSROOT \
+			--enable-languages=c,c++ \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--disable-multilib \
+			--disable-libquadmath \
+			--disable-libquadmath-support \
+			--with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+			--with-ppl=no \
+			--with-isl=no \
+			--with-cloog=no \
+			--with-libelf=no
+	else
+		$SRC/$GCCV/configure \
+			--prefix=$TOOLS \
+			--target=$TARGET \
+			--build=$BUILD \
+			--host=$HOST \
+			--with-sysroot=$SYSROOT \
+			--enable-languages=c,c++ \
+			--disable-libssp \
+			--disable-libgomp \
+			--disable-libmudflap \
+			--disable-libquadmath \
+			--disable-libquadmath-support \
+			--with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+			--with-ppl=no \
+			--with-isl=no \
+			--with-cloog=no \
+			--with-libelf=no
+	fi
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
 	PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
 	
@@ -477,27 +544,7 @@ phase_8() {
 
 	PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -static -o helloc ./helloc.c
 	log "RUN MANUALLY: Produced test-binary at: $test_path/helloc"
-
-	# log "Testing to compile a Go program."
-
-	# cat <<- EOF > hellogo.go
-	# package main
-
-	# import (
-	# 	"fmt"
-	# )
-
-	# func main() {
-	# 	fmt.Printf("%s\n", "Hello, Gopher!")
-	# }
-	# EOF
-
-	# TODO enable when mgo is built
-	#PATH="$TOOLS/bin:$PATH" go build -compiler gccgo ./hellogo.go
-	#log "RUN MANUALLY: Produced test-binary at: $test_path/hellogo"
-
 	log "Access compiler tools: $ export PATH=\"$TOOLS/bin:\$PATH\""
-	# log "Run dynamically linked Go programs: $ export LD_LIBRARY_PATH=\"$TOOLS/$TARGET/lib:\$LD_LIBRARY_PATH\""
 }
 
 list_phases() {
@@ -574,7 +621,6 @@ parse_cmdline() {
 	done
 	shift $(($OPTIND - 1))
 }
-
 
 parse_cmdline "$@"
 for (( phase="$phase_start"; $phase <= "$phase_stop"; phase++ )); do
