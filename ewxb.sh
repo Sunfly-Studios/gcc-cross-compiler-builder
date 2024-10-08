@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Build a GCC toolchain from scratch.
-# Author: Erik Westrup <erik.westrup@gmail.com>
-# Modified by MBCX
-# Inspired by Jim Blandy's excellent eglibc cross-compiling guide posted at eglibc's 
-# mailinglist as "[patches] Cross-building instructions", available at 
-# https://web.archive.org/web/20160306041709/http://www.eglibc.org/archives/patches/msg00078.html
 
 set -e
 
@@ -41,7 +35,7 @@ i=1
 for config_file in "$ARCH_DIR"/env-*.sh; do
     if [ -f "$config_file" ]; then
         echo "$i) $(basename "$config_file")"
-        config_files[i]="$config_file"
+        config_files[$i]="$config_file"
         ((i++))
     fi
 done
@@ -51,7 +45,7 @@ if [ ${#config_files[@]} -eq 0 ]; then
     exit 1
 fi
 
-read -p "Enter the number of the configuration to build: " -r selection
+read -p "Enter the number of the configuration to build: " selection
 
 if [ -z "${config_files[$selection]}" ]; then
     echo "Invalid selection"
@@ -67,14 +61,12 @@ case $confirm in
     *) source "$selected_config" ;;
 esac
 
-
 # Log stdout and stderr.
 date=$(date "+%Y-%m-%d")
 log_file="/tmp/${scriptname}_${date}.log"
 exec > >(tee -a "$log_file")
 exec 2> >(tee -a "$log_file" >&2)
 log "$(date "+%Y-%m-%d-%H:%M:%S") Appending stdout & stdin to: ${log_file}"
-
 
 extract_linux_version() {
     local version=$(echo "$1" | cut -d"-" -f2)
@@ -107,9 +99,21 @@ setup_and_enter_dir() {
     cd "$dir"
 }
 
-declare -A phases # Assoc array with phase to name mappings.
+get_phase_description() {
+    case "$1" in
+        0) echo "prefix" ;;
+        1) echo "binutils, texinfo and (optionally) make." ;;
+        2) echo "gcc1" ;;
+        3) echo "linux headers" ;;
+        4) echo "glibc headers" ;;
+        5) echo "gcc2" ;;
+        6) echo "glibc full" ;;
+        7) echo "gcc3" ;;
+        8) echo "testing" ;;
+        *) echo "Unknown phase" ;;
+    esac
+}
 
-phases+=(["0"]="prefix")
 phase_0() {
     log "Setting up work dirs and fetching/unpacking sources."
 
@@ -189,7 +193,7 @@ phase_0() {
 
     if glibc_needs_port_pkg; then
         cd $GLIBCV
-        glibcport="glibc-$GLIBCVNO"
+        glibcport="glibc-ports-2.11"
         if ! [ -f "$glibcport.tar.bz2" ]; then
             log "Fetching ports extension $glibcport.tar.bz2"
             wget http://ftp.gnu.org/gnu/glibc/$glibcport.tar.bz2
@@ -211,9 +215,9 @@ phase_0() {
     if ! [ -d "$LINUXV" ]; then
         tar xvzf $LINUXV.tar.gz
     fi
+    return 0
 }
 
-phases+=(["1"]="binutils, texinfo and (optionally) make.")
 phase_1() {
     log "Building texinfo, (optionally) make and cross-compiling binutils."
 
@@ -233,9 +237,8 @@ phase_1() {
     
     $SRC/$TEXINFOV/configure \
         --prefix=$TOOLS \
-          --build=$MACHTYPE \
-          --host=$TARGET
-
+        --build=$MACHTYPE \
+        --host=$TARGET
     make $PARALLEL_MAKE
     make install
     
@@ -248,9 +251,10 @@ phase_1() {
 
     make $PARALLEL_MAKE
     make $PARALLEL_MAKE install
+    PATH="$TOOLS/bin:$PATH"
+    return 0
 }
 
-phases+=(["2"]="gcc1")
 phase_2() {
     log "Building barebone cross GCC so glibc headers can be compiled."
 
@@ -295,9 +299,9 @@ phase_2() {
 
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc
+    return 0
 }
 
-phases+=(["3"]="linux headers")
 phase_3() {
     log "Compiling and installing Linux header files."
 
@@ -310,9 +314,9 @@ phase_3() {
         ARCH=$LINUX_ARCH \
         CROSS_COMPILE=$TARGET \
         INSTALL_HDR_PATH=$SYSROOT/usr
+    return 0
 }
 
-phases+=(["4"]="glibc headers")
 phase_4() {
     log "Install header files and bootstrap libc with friends."
 
@@ -327,11 +331,12 @@ phase_4() {
     fi
     local linux_version=${LINUXMIN:-LINUXV##*-}
 
-    BUILD_CC=gcc \
-    CC=$TOOLS/bin/$TARGET-gcc \
-    CXX=$TOOLS/bin/$TARGET-g++ \
-    AR=$TOOLS/bin/$TARGET-ar \
-    RANLIB=$TOOLS/bin/$TARGET-ranlib \
+    BUILD_CC=gcc
+    CC=$TOOLS/bin/$TARGET-gcc
+    CXX=$TOOLS/bin/$TARGET-g++
+    AR=$TOOLS/bin/$TARGET-ar
+    RANLIB=$TOOLS/bin/$TARGET-ranlib
+
     $SRC/$GLIBCV/configure \
         --prefix=/usr \
         --build=$BUILD \
@@ -366,9 +371,9 @@ phase_4() {
     touch $SYSROOT/usr/include/gnu/stubs.h
 
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_old"
+    return 0
 }
 
-phases+=(["5"]="gcc2")
 phase_5() {
     log "Build bootstrapped gcc that can compile a full glibc."
 
@@ -420,9 +425,9 @@ phase_5() {
     fi
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
+    return 0
 }
 
-phases+=(["6"]="glibc full")
 phase_6() {
     log "Building a full glibc for $TARGET."
 
@@ -442,11 +447,11 @@ phase_6() {
     fi
     local linux_version=${LINUXMIN:-LINUXV##*-}
 
-    BUILD_CC=gcc \
-    CC=$TOOLS/bin/$TARGET-gcc \
-    CXX=$TOOLS/bin/$TARGET-g++ \
-    AR=$TOOLS/bin/$TARGET-ar \
-    RANLIB=$TOOLS/bin/$TARGET-ranlib \
+    BUILD_CC=gcc
+    CC=$TOOLS/bin/$TARGET-gcc
+    CXX=$TOOLS/bin/$TARGET-g++
+    AR=$TOOLS/bin/$TARGET-ar
+    RANLIB=$TOOLS/bin/$TARGET-ranlib
     $SRC/$GLIBCV/configure \
         --prefix=/usr \
         --build=$BUILD \
@@ -465,9 +470,9 @@ phase_6() {
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install install_root=$SYSROOT
 
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_old"
+    return 0
 }
 
-phases+=(["7"]="gcc3")
 phase_7() {
     log "Building the full GCC."
 
@@ -522,58 +527,53 @@ phase_7() {
             ln -sf "$file" "$tool_name"
         fi
     done
+    return 0
 }
 
-phases+=(["8"]="testing")
 phase_8() {
     log "Testing to compile a C program."
 
     test_path="/tmp/${TARGET}_test_$$"
     setup_and_enter_dir "$test_path"
 
-    cat <<- EOF > helloc.c
-    #include <stdlib.h>
-    #include <stdio.h>
+    cat <<-EOF > helloc.c
+	#include <stdlib.h>
+	#include <stdio.h>
 
-    int main(int argc, const char *argv[])
-    {
-        printf("%s\n", "Hello, MIPS world!");
-        return EXIT_SUCCESS;
-    }
-    EOF
+	int main(int argc, const char *argv[])
+	{
+	    printf("%s\n", "Hello, MIPS world!");
+	    return EXIT_SUCCESS;
+	}
+EOF
 
     PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -static -o helloc ./helloc.c
     log "RUN MANUALLY: Produced test-binary at: $test_path/helloc"
     log "Access compiler tools: $ export PATH=\"$TOOLS/bin:\$PATH\""
+    return 0
 }
 
 list_phases() {
     echo "Available phases:"
-    for phase_no in "${!phases[@]}"; do
-        printf "\t%d => %s\n" "$phase_no" "${phases["$phase_no"]}"
+    for phase_no in $(seq 0 8); do
+        printf "\t%d => %s\n" "$phase_no" "$(get_phase_description $phase_no)"
     done
 }
 
-
-set +e
-read -r -d '' help_text <<EOF
-Erik Westrup's GCC cross-compiler builder
+help_text="Erik Westrup's GCC cross-compiler builder
 
 Usage: ${scriptname} -p phases | -l | (-h | -?)
-    -p phases	The phases to run. Supported formats:
-                1) 2	=> run phase 3
-                2) 4-	=> run phase 4 to last (inclusive). "0-" => full build
-                e) 1-5	=> run phases 1 to 5 (inclusive)
-    -l			List available phases.
-    -h, -? 		This help text.
-EOF
-set -e
+    -p phases   The phases to run. Supported formats:
+                1) 2    => run phase 3
+                2) 4-   => run phase 4 to last (inclusive). \"0-\" => full build
+                e) 1-5  => run phases 1 to 5 (inclusive)
+    -l          List available phases.
+    -h, -?      This help text."
 
 phase_first=0
 phase_last=8
 phase_start="$phase_first"
 phase_stop="$phase_last"
-
 
 validate_phase() {
     local phase="$1"
@@ -596,7 +596,7 @@ parse_cmdline() {
                     validate_phase "$phase_start"
                     phase_stop="$phase_start"
                 elif [[ $OPTARG =~ ^[[:digit:]]+-$ ]]; then
-                    phase_start="${OPTARG:0:-1}"
+                    phase_start="${OPTARG%-}"
                     validate_phase "$phase_start"
                     phase_stop="$phase_last"
                 elif [[ $OPTARG =~ ^[[:digit:]]+-[[:digit:]]+$ ]]; then
@@ -623,13 +623,16 @@ parse_cmdline() {
 }
 
 parse_cmdline "$@"
-for (( phase="$phase_start"; $phase <= "$phase_stop"; phase++ )); do
-    log "$funcstars Stating phase $phase"
-    log "$phasestars ${phases["$phase"]}"
-    # Add a pause so that we can easly see the
+for (( phase="$phase_start"; phase <= "$phase_stop"; phase++ )); do
+    log "$funcstars Starting phase $phase"
+    log "$phasestars $(get_phase_description "$phase")"
+    # Add a pause so that we can easily see the
     # phase completed and phase to go next.
     read -p "" -n1 -s
-    eval "phase_$phase"
-    log "$phasestars ${phases["$phase"]}"
+    if ! eval "phase_$phase"; then
+        log "Error occurred in phase $phase"
+        exit 1
+    fi
+    log "$phasestars $(get_phase_description "$phase")"
     log "$funcstars Completed phase $phase"
 done
