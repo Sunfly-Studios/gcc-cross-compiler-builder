@@ -81,7 +81,7 @@ extract_linux_version() {
 }
 
 glibc_needs_port_pkg() {
-    [[ $GLIBCVNO =~ 2\.([3-9]|1[0-6]) ]]
+    return 1
 }
 
 setup_and_enter_dir() {
@@ -227,10 +227,11 @@ phase_1() {
         $SRC/$MAKEV/configure \
             --prefix=$TOOLS \
             --build=$MACHTYPE \
-            --host=$TARGET
-
-        make $PARALLEL_MAKE
-        make install
+            --host=$TARGET || return 1
+        
+        # Make sure to fail if something did go wrong.
+        make $PARALLEL_MAKE || return 1
+        make install || return 1
     fi
 
     setup_and_enter_dir "$OBJ/texinfo"
@@ -238,19 +239,19 @@ phase_1() {
     $SRC/$TEXINFOV/configure \
         --prefix=$TOOLS \
         --build=$MACHTYPE \
-        --host=$TARGET
-    make $PARALLEL_MAKE
-    make install
+        --host=$TARGET || return 1
+    make $PARALLEL_MAKE || return 1
+    make install || return 1
     
     setup_and_enter_dir "$OBJ/binutils"
 
     $SRC/$BINUTILSV/configure \
         --prefix=$TOOLS \
         --target=$TARGET \
-        --with-sysroot=$SYSROOT
+        --with-sysroot=$SYSROOT || return 1
 
-    make $PARALLEL_MAKE
-    make $PARALLEL_MAKE install
+    make $PARALLEL_MAKE || return 1
+    make $PARALLEL_MAKE install || return 1
     PATH="$TOOLS/bin:$PATH"
     return 0
 }
@@ -277,8 +278,8 @@ phase_2() {
             --disable-libgomp \
             --disable-libmudflap \
             --disable-libquadmath \
-            --disable-multilib
-    else
+            --disable-multilib || return 1
+    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
         $SRC/$GCCV/configure \
             --prefix=$TOOLS \
             --build=$BUILD \
@@ -294,11 +295,31 @@ phase_2() {
             --disable-libssp \
             --disable-libgomp \
             --disable-libmudflap \
-            --disable-libquadmath
+            --disable-libquadmath \
+            --with-arch=loongarch64 \
+            --with-abi=lp64d || return 1
+    else
+        $SRC/$GCCV/configure \
+            --prefix=$TOOLS \
+            --build=$BUILD \
+            --host=$HOST \
+            --target=$TARGET \
+            --enable-languages=c \
+            --without-headers \
+            --with-newlib \
+            --with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
+            --disable-libgcc \
+            --disable-multilib \
+            --disable-shared \
+            --disable-threads \
+            --disable-libssp \
+            --disable-libgomp \
+            --disable-libmudflap \
+            --disable-libquadmath || return 1
     fi
 
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc || return 1
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc || return 1
     return 0
 }
 
@@ -310,10 +331,11 @@ phase_3() {
     cd $OBJ/$LINUXV
 
     make clean
+    make mrproper
     make $PARALLEL_MAKE headers_install \
         ARCH=$LINUX_ARCH \
         CROSS_COMPILE=$TARGET \
-        INSTALL_HDR_PATH=$SYSROOT/usr
+        INSTALL_HDR_PATH=$SYSROOT/usr || return 1
     return 0
 }
 
@@ -325,42 +347,73 @@ phase_4() {
     LD_LIBRARY_PATH_old="$LD_LIBRARY_PATH"
     unset LD_LIBRARY_PATH
 
-    local addons="--enable-add-ons"
+    local addons=""
     if glibc_needs_port_pkg; then
         addons="--enable-add-ons=nptl,ports"
     fi
-    local linux_version=${LINUXMIN:-LINUXV##*-}
-
-    BUILD_CC=gcc
-    CC=$TOOLS/bin/$TARGET-gcc
-    CXX=$TOOLS/bin/$TARGET-g++
-    AR=$TOOLS/bin/$TARGET-ar
-    RANLIB=$TOOLS/bin/$TARGET-ranlib
-
-    $SRC/$GLIBCV/configure \
-        --prefix=/usr \
-        --build=$BUILD \
-        --host=$TARGET \
-        --with-headers=$SYSROOT/usr/include \
-        --disable-werror \
-        --with-binutils=$TOOLS/$TARGET/bin \
-        $addons \
-        --enable-kernel="$linux_version" \
-        --disable-profile \
-        --without-gd \
-        --without-cvs \
-        --with-tls \
-        libc_cv_ctors_header=yes \
-        libc_cv_gcc_builtin_expect=yes \
-        libc_cv_mips_tls=yes \
-        libc_cv_forced_unwind=yes \
-        libc_cv_c_cleanup=yes
-
-    make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT
+    
+    local linux_version=""
+    if [ -n "$LINUXMIN" ]; then
+        linux_version="$LINUXMIN"
+    else
+        linux_version=$(echo "$LINUXV" | sed -e 's/.*-//')
+    fi
+    
+    if [[ $TARGET == "loongarch64-linux-gnu" ]]; then
+        # Loongarch64 requires specific ABI settings
+        extra_config_opts="--enable-stack-protector=strong --with-fp-cond=64"
+        
+        BUILD_CC=gcc \
+        CC=$TOOLS/bin/$TARGET-gcc \
+        CXX=$TOOLS/bin/$TARGET-g++ \
+        AR=$TOOLS/bin/$TARGET-ar \
+        RANLIB=$TOOLS/bin/$TARGET-ranlib \
+        $SRC/$GLIBCV/configure \
+            --prefix=/usr \
+            --build=$BUILD \
+            --host=$TARGET \
+            --with-headers=$SYSROOT/usr/include \
+            --disable-werror \
+            --with-binutils=$TOOLS/$TARGET/bin \
+            $addons \
+            --enable-kernel="$linux_version" \
+            --disable-profile \
+            --without-gd \
+            --without-cvs \
+            --with-tls \
+            $extra_config_opts \
+            libc_cv_forced_unwind=yes || return 1
+    else
+        BUILD_CC=gcc \
+        CC=$TOOLS/bin/$TARGET-gcc \
+        CXX=$TOOLS/bin/$TARGET-g++ \
+        AR=$TOOLS/bin/$TARGET-ar \
+        RANLIB=$TOOLS/bin/$TARGET-ranlib \
+        $SRC/$GLIBCV/configure \
+            --prefix=/usr \
+            --build=$BUILD \
+            --host=$TARGET \
+            --with-headers=$SYSROOT/usr/include \
+            --disable-werror \
+            --with-binutils=$TOOLS/$TARGET/bin \
+            $addons \
+            --enable-kernel="$linux_version" \
+            --disable-profile \
+            --without-gd \
+            --without-cvs \
+            --with-tls \
+            libc_cv_ctors_header=yes \
+            libc_cv_gcc_builtin_expect=yes \
+            libc_cv_mips_tls=yes \
+            libc_cv_forced_unwind=yes \
+            libc_cv_c_cleanup=yes || return 1
+    fi
+    
+    make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT || return 1
 
     mkdir -p $SYSROOT/usr/lib
     make $PARALLEL_MAKE csu/subdir_lib
-    cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib
+    cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib || return 1
 
     if [ "$GLIBCVNO" == "2.15" ]; then # At least 2.19 does this with install-headers target it self.
         cp bits/stdio_lim.h $SYSROOT/usr/include/bits
@@ -400,7 +453,41 @@ phase_5() {
             --disable-libquadmath \
             --disable-libquadmath-support \
             --disable-libatomic \
-            --disable-multilib
+            --disable-multilib || return 1
+    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
+        $SRC/$GCCV/configure \
+            --prefix=$TOOLS \
+            --target=$TARGET \
+            --build=$BUILD \
+            --host=$HOST \
+            --with-sysroot=$SYSROOT \
+            --with-build-sysroot=$SYSROOT \
+            --with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
+            --enable-languages=c \
+            --disable-libssp \
+            --disable-libgomp \
+            --disable-libmudflap \
+            --with-arch=loongarch64 \
+            --with-abi=lp64d \
+            --with-ppl=no \
+            --with-isl=no \
+            --with-cloog=no \
+            --with-libelf=no \
+            --disable-nls \
+            --disable-multilib \
+            --disable-libquadmath \
+            --disable-libquadmath-support \
+            --disable-libatomic || return 1
+
+            # For some reason, GCC is looking at its own directories when
+            # trying to find these files....
+            mkdir -p $TOOLS/$TARGET/lib
+            if [ ! -e $TOOLS/$TARGET/lib/crti.o ]; then
+                ln -sf $SYSROOT/usr/lib/crti.o $TOOLS/$TARGET/lib/crti.o
+            fi
+            if [ ! -e $TOOLS/$TARGET/lib/crtn.o ]; then
+                ln -sf $SYSROOT/usr/lib/crtn.o $TOOLS/$TARGET/lib/crtn.o
+            fi
     else
         $SRC/$GCCV/configure \
             --prefix=$TOOLS \
@@ -413,6 +500,7 @@ phase_5() {
             --disable-libssp \
             --disable-libgomp \
             --disable-libmudflap \
+            --disable-multilib \
             --with-ppl=no \
             --with-isl=no \
             --with-cloog=no \
@@ -421,10 +509,10 @@ phase_5() {
             --disable-multilib \
             --disable-libquadmath \
             --disable-libquadmath-support \
-            --disable-libatomic
+            --disable-libatomic || return 1
     fi
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
     return 0
 }
 
@@ -436,7 +524,8 @@ phase_6() {
     LD_LIBRARY_PATH_old="$LD_LIBRARY_PATH"
     unset LD_LIBRARY_PATH
 
-    local addons="--enable-add-ons"
+    local addons=""
+    
     if glibc_needs_port_pkg; then
         addons="--enable-add-ons=nptl,ports"
     fi
@@ -445,29 +534,61 @@ phase_6() {
     if [ "$GLIBCVNO" == "2.15" ]; then # The one I've noticed, 2.19 does not need for example.
         extra_lib_cv="libc_cv_ctors_header=yes libc_cv_c_cleanup=yes"
     fi
-    local linux_version=${LINUXMIN:-LINUXV##*-}
+    
+    local linux_version=""
+    if [ -n "$LINUXMIN" ]; then
+        linux_version="$LINUXMIN"
+    else
+        linux_version=$(echo "$LINUXV" | sed -e 's/.*-//')
+    fi
 
-    BUILD_CC=gcc
-    CC=$TOOLS/bin/$TARGET-gcc
-    CXX=$TOOLS/bin/$TARGET-g++
-    AR=$TOOLS/bin/$TARGET-ar
-    RANLIB=$TOOLS/bin/$TARGET-ranlib
-    $SRC/$GLIBCV/configure \
-        --prefix=/usr \
-        --build=$BUILD \
-        --host=$TARGET \
-        --disable-profile \
-        --without-gd \
-        --without-cvs \
-        --disable-werror \
-        --with-binutils=$TOOLS/$TARGET/bin \
-        $addons \
-        --enable-kernel="$linux_version" \
-        libc_cv_forced_unwind=yes \
-        $extra_lib_cv
+    if [[ $TARGET == "loongarch64-linux-gnu" ]]; then
+        # Loongarch64 requires specific ABI settings
+        extra_config_opts="--enable-stack-protector=strong --with-fp-cond=64"
+        
+        BUILD_CC=gcc \
+        CC=$TOOLS/bin/$TARGET-gcc \
+        CXX=$TOOLS/bin/$TARGET-g++ \
+        AR=$TOOLS/bin/$TARGET-ar \
+        RANLIB=$TOOLS/bin/$TARGET-ranlib \
+        $SRC/$GLIBCV/configure \
+            --prefix=/usr \
+            --build=$BUILD \
+            --host=$TARGET \
+            --with-headers=$SYSROOT/usr/include \
+            --disable-werror \
+            --with-binutils=$TOOLS/$TARGET/bin \
+            $addons \
+            --enable-kernel="$linux_version" \
+            --disable-profile \
+            --without-gd \
+            --without-cvs \
+            --with-tls \
+            $extra_config_opts \
+            libc_cv_forced_unwind=yes || return 1
+    else
+        BUILD_CC=gcc \
+        CC=$TOOLS/bin/$TARGET-gcc \
+        CXX=$TOOLS/bin/$TARGET-g++ \
+        AR=$TOOLS/bin/$TARGET-ar \
+        RANLIB=$TOOLS/bin/$TARGET-ranlib \
+        $SRC/$GLIBCV/configure \
+            --prefix=/usr \
+            --build=$BUILD \
+            --host=$TARGET \
+            --disable-profile \
+            --without-gd \
+            --without-cvs \
+            --disable-werror \
+            --with-binutils=$TOOLS/$TARGET/bin \
+            $addons \
+            --enable-kernel="$linux_version" \
+            libc_cv_forced_unwind=yes \
+            $extra_lib_cv || return 1
+    fi
 
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install install_root=$SYSROOT
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install install_root=$SYSROOT || return 1
 
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_old"
     return 0
@@ -496,8 +617,8 @@ phase_7() {
             --with-ppl=no \
             --with-isl=no \
             --with-cloog=no \
-            --with-libelf=no
-    else
+            --with-libelf=no || return 1
+    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
         $SRC/$GCCV/configure \
             --prefix=$TOOLS \
             --target=$TARGET \
@@ -510,14 +631,35 @@ phase_7() {
             --disable-libmudflap \
             --disable-libquadmath \
             --disable-libquadmath-support \
+            --with-arch=loongarch64 \
+            --with-abi=lp64d \
             --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
             --with-ppl=no \
             --with-isl=no \
             --with-cloog=no \
-            --with-libelf=no
+            --with-libelf=no || return 1
+    else
+        $SRC/$GCCV/configure \
+            --prefix=$TOOLS \
+            --target=$TARGET \
+            --build=$BUILD \
+            --host=$HOST \
+            --with-sysroot=$SYSROOT \
+            --enable-languages=c,c++ \
+            --disable-multilib \
+            --disable-libssp \
+            --disable-libgomp \
+            --disable-libmudflap \
+            --disable-libquadmath \
+            --disable-libquadmath-support \
+            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+            --with-ppl=no \
+            --with-isl=no \
+            --with-cloog=no \
+            --with-libelf=no || return 1
     fi
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE
-    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
+    PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
     
     cd $TOOLS/bin
     for file in $(find . -type f); do
