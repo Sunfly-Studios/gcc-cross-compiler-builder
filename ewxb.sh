@@ -114,6 +114,16 @@ get_phase_description() {
     esac
 }
 
+ensure_tools_in_path() {
+    # Check if $TOOLS/bin is already in PATH
+    if [[ ":$PATH:" != *":$TOOLS/bin:"* ]]; then
+        log "Adding $TOOLS/bin to PATH"
+        export PATH="$TOOLS/bin:$PATH"
+    else
+        log "PATH already contains $TOOLS/bin"
+    fi
+}
+
 phase_0() {
     log "Setting up work dirs and fetching/unpacking sources."
 
@@ -234,6 +244,7 @@ phase_1() {
         make install || return 1
     fi
 
+    ensure_tools_in_path
     setup_and_enter_dir "$OBJ/texinfo"
     
     $SRC/$TEXINFOV/configure \
@@ -248,75 +259,40 @@ phase_1() {
     $SRC/$BINUTILSV/configure \
         --prefix=$TOOLS \
         --target=$TARGET \
-        --with-sysroot=$SYSROOT || return 1
+        --with-sysroot=$SYSROOT \
+        --enable-plugins \
+        --enable-shared \
+        --enable-lto || return 1
 
     make $PARALLEL_MAKE || return 1
     make $PARALLEL_MAKE install || return 1
-    PATH="$TOOLS/bin:$PATH"
     return 0
 }
 
 phase_2() {
     log "Building barebone cross GCC so glibc headers can be compiled."
 
+    ensure_tools_in_path
     setup_and_enter_dir "$OBJ/gcc1"
 
-    if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --build=$BUILD \
-            --host=$HOST \
-            --target=$TARGET \
-            --enable-languages=c \
-            --without-headers \
-            --with-newlib \
-            --with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
-            --disable-libgcc \
-            --disable-shared \
-            --disable-threads \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --disable-multilib || return 1
-    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --build=$BUILD \
-            --host=$HOST \
-            --target=$TARGET \
-            --enable-languages=c \
-            --without-headers \
-            --with-newlib \
-            --with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
-            --disable-libgcc \
-            --disable-shared \
-            --disable-threads \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --with-arch=loongarch64 \
-            --with-abi=lp64d || return 1
-    else
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --build=$BUILD \
-            --host=$HOST \
-            --target=$TARGET \
-            --enable-languages=c \
-            --without-headers \
-            --with-newlib \
-            --with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
-            --disable-libgcc \
-            --disable-multilib \
-            --disable-shared \
-            --disable-threads \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath || return 1
-    fi
+    $SRC/$GCCV/configure \
+        --prefix=$TOOLS \
+        --build=$BUILD \
+        --host=$HOST \
+        --target=$TARGET \
+        --enable-languages=c \
+        --without-headers \
+        --with-newlib \
+        --with-pkgversion="${USER}'s $TARGET GCC phase1 cross-compiler" \
+        --disable-libgcc \
+        --disable-shared \
+        --disable-threads \
+        --disable-multilib \
+        --disable-libssp \
+        --disable-libgomp \
+        --disable-libmudflap \
+        --disable-libquadmath \
+        $TARGET_CONFIGURE_FLAGS || return 1
 
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE all-gcc || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install-gcc || return 1
@@ -325,7 +301,7 @@ phase_2() {
 
 phase_3() {
     log "Compiling and installing Linux header files."
-
+    ensure_tools_in_path
     rm -rf $OBJ/$LINUXV
     cp -r $SRC/$LINUXV $OBJ # Make modifies the tree; make copy.
     cd $OBJ/$LINUXV
@@ -341,6 +317,7 @@ phase_3() {
 
 phase_4() {
     log "Install header files and bootstrap libc with friends."
+    ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/glibc-headers"
 
@@ -412,7 +389,7 @@ phase_4() {
     make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT || return 1
 
     mkdir -p $SYSROOT/usr/lib
-    make $PARALLEL_MAKE csu/subdir_lib
+    make $PARALLEL_MAKE csu/subdir_lib || return 1
     cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib || return 1
 
     if [ "$GLIBCVNO" == "2.15" ]; then # At least 2.19 does this with install-headers target it self.
@@ -429,87 +406,42 @@ phase_4() {
 
 phase_5() {
     log "Build bootstrapped gcc that can compile a full glibc."
+    ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/gcc2"
+    $SRC/$GCCV/configure \
+        --prefix=$TOOLS \
+        --target=$TARGET \
+        --build=$BUILD \
+        --host=$HOST \
+        --with-sysroot=$SYSROOT \
+        --with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
+        --enable-languages=c \
+        --disable-libssp \
+        --disable-libgomp \
+        --disable-libmudflap \
+        --disable-multilib \
+        --with-ppl=no \
+        --with-isl=no \
+        --with-cloog=no \
+        --with-libelf=no \
+        --disable-nls \
+        --disable-multilib \
+        --disable-libquadmath \
+        --disable-libquadmath-support \
+        --disable-libatomic \
+        $TARGET_CONFIGURE_FLAGS || return 1
 
-    if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
-            --enable-languages=c \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no \
-            --disable-nls \
-            --disable-multilib \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --disable-libatomic \
-            --disable-multilib || return 1
-    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --with-build-sysroot=$SYSROOT \
-            --with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
-            --enable-languages=c \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --with-arch=loongarch64 \
-            --with-abi=lp64d \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no \
-            --disable-nls \
-            --disable-multilib \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --disable-libatomic || return 1
-
-            # For some reason, GCC is looking at its own directories when
-            # trying to find these files....
-            mkdir -p $TOOLS/$TARGET/lib
-            if [ ! -e $TOOLS/$TARGET/lib/crti.o ]; then
-                ln -sf $SYSROOT/usr/lib/crti.o $TOOLS/$TARGET/lib/crti.o
-            fi
-            if [ ! -e $TOOLS/$TARGET/lib/crtn.o ]; then
-                ln -sf $SYSROOT/usr/lib/crtn.o $TOOLS/$TARGET/lib/crtn.o
-            fi
-    else
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --with-pkgversion="${USER}'s $TARGET GCC phase2 cross-compiler" \
-            --enable-languages=c \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-multilib \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no \
-            --disable-nls \
-            --disable-multilib \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --disable-libatomic || return 1
+    if [[ $TARGET == "loongarch64-linux-gnu" || $TARGET == "mips64el-linux-gnu" || $TARGET == "mipsel-linux-gnu" || $TARGET == "mips64-linux-gnu" ]]; then
+        # For some reason, GCC is looking at its own directories when
+        # trying to find these files....
+        mkdir -p $TOOLS/$TARGET/lib
+        if [ ! -e $TOOLS/$TARGET/lib/crti.o ]; then
+            ln -sf $SYSROOT/usr/lib/crti.o $TOOLS/$TARGET/lib/crti.o
+        fi
+        if [ ! -e $TOOLS/$TARGET/lib/crtn.o ]; then
+            ln -sf $SYSROOT/usr/lib/crtn.o $TOOLS/$TARGET/lib/crtn.o
+        fi
     fi
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
@@ -518,6 +450,7 @@ phase_5() {
 
 phase_6() {
     log "Building a full glibc for $TARGET."
+    ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/glibc"
 
@@ -596,68 +529,29 @@ phase_6() {
 
 phase_7() {
     log "Building the full GCC."
+    ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/gcc3"
+    $SRC/$GCCV/configure \
+        --prefix=$TOOLS \
+        --target=$TARGET \
+        --build=$BUILD \
+        --host=$HOST \
+        --with-sysroot=$SYSROOT \
+        --enable-languages=c,c++,lto \
+        --disable-multilib \
+        --disable-libssp \
+        --disable-libgomp \
+        --disable-libmudflap \
+        --disable-libquadmath \
+        --disable-libquadmath-support \
+        --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+        --with-ppl=no \
+        --with-isl=no \
+        --with-cloog=no \
+        --with-libelf=no \
+        $TARGET_CONFIGURE_FLAGS || return 1
 
-    if [[ $TARGET == "x86_64-linux-gnu" || $TARGET == "i686-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --enable-languages=c,c++ \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-multilib \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no || return 1
-    elif [[ $TARGET == "loongarch64-linux-gnu" ]]; then
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --enable-languages=c,c++ \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --with-arch=loongarch64 \
-            --with-abi=lp64d \
-            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no || return 1
-    else
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --enable-languages=c,c++ \
-            --disable-multilib \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no || return 1
-    fi
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
     
@@ -684,7 +578,7 @@ phase_8() {
 
 	int main(int argc, const char *argv[])
 	{
-	    printf("%s\n", "Hello, MIPS world!");
+	    printf("%s\n", "Hello, ${LINUX_ARCH} world!");
 	    return EXIT_SUCCESS;
 	}
 EOF
@@ -692,6 +586,8 @@ EOF
     PATH="$TOOLS/bin:$PATH" $TARGET-gcc -Wall -static -o helloc ./helloc.c
     log "RUN MANUALLY: Produced test-binary at: $test_path/helloc"
     log "Access compiler tools: $ export PATH=\"$TOOLS/bin:\$PATH\""
+    log "Removing obj files"
+    rm -rf $OBJ
     return 0
 }
 

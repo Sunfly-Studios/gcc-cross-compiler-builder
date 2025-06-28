@@ -1,13 +1,13 @@
 # Cross variables.
 export HOST="$MACHTYPE"
 export BUILD="$HOST"
-export TARGET="loongarch64-linux-gnu"
-export LINUX_ARCH="loongarch"
+export TARGET="powerpcle-linux-gnu"
+export LINUX_ARCH="powerpc"
 
 # Target flags for GCC abi consistency
 # if not defined, then it uses defaults
-export TARGET_CFLAGS=""
-export TARGET_CONFIGURE_FLAGS="--with-arch=loongarch64 --with-abi=lp64d"
+export TARGET_CFLAGS="-mcpu=powerpc -mlittle"
+export TARGET_CONFIGURE_FLAGS="--with-cpu=powerpc --enable-secureplt --with-long-double-64 --with-endian=little"
 
 # Work directories
 export CWORK="$HOME/sysroot/${TARGET}"
@@ -18,12 +18,12 @@ export SYSROOT="$CWORK/sysroot"
 export HEADER_DIR="${CWORK}/${TARGET}"
 
 # Pkg versions
-export BINUTILSV=binutils-2.44
-export GCCV=gcc-15.1.0
-export GLIBCV=glibc-2.36
+export BINUTILSV=binutils-2.34
+export GCCV=gcc-9.5.0
+export GLIBCV=glibc-2.28
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
-export LINUXV=linux-5.19
-export TEXINFOV=texinfo-6.8
-export MAKEV=make-4.4
-
+export LINUXV=linux-4.19
+export LINUXMIN=2.6.9
+export MAKEV=make-4.3
+export TEXINFOV=texinfo-6.5
 export PARALLEL_MAKE="-j8"
