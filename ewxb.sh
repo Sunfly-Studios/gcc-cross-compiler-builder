@@ -247,10 +247,19 @@ phase_1() {
     ensure_tools_in_path
     setup_and_enter_dir "$OBJ/texinfo"
     
-    $SRC/$TEXINFOV/configure \
-        --prefix=$TOOLS \
-        --build=$MACHTYPE \
-        --host=$TARGET || return 1
+    if [[ $TARGET == "alpha-linux-gnu" ]]; then
+        # texinfo gets confused with the endianess.
+        $SRC/$TEXINFOV/configure \
+            --prefix=$TOOLS \
+            --build=$MACHTYPE \
+            --host=$TARGET \
+            ac_cv_c_bigendian=no || return 1
+    else
+        $SRC/$TEXINFOV/configure \
+            --prefix=$TOOLS \
+            --build=$MACHTYPE \
+            --host=$TARGET || return 1
+    fi
     make $PARALLEL_MAKE || return 1
     make install || return 1
     
