@@ -6,8 +6,8 @@ export LINUX_ARCH="alpha"
 
 # Target flags for GCC abi consistency
 # if not defined, then it uses defaults
-export TARGET_CFLAGS="-mcpu=ev56 -mieee"
-export TARGET_CONFIGURE_FLAGS="--with-cpu=ev56 --enable-secureplt --with-long-double-64 --enable-cxx-flags=-mieee"
+export TARGET_CFLAGS="-mcpu=ev5 -mieee"
+export TARGET_CONFIGURE_FLAGS="--with-cpu=ev5 --enable-secureplt --with-long-double-64 --enable-cxx-flags=-mieee"
 
 # Work directories
 export CWORK="$HOME/sysroot/${TARGET}"
