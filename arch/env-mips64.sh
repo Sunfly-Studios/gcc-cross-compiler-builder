@@ -1,13 +1,16 @@
 # Cross variables.
 export HOST="$MACHTYPE"
 export BUILD="$HOST"
-export TARGET="mips64-linux-gnu"
 export LINUX_ARCH="mips"
 
-# Target flags for GCC abi consistency
-# if not defined, then it uses defaults
-export TARGET_CFLAGS="-march=mips64 -mabi=64 -mbig-endian"
-export TARGET_CONFIGURE_FLAGS="--with-arch=mips64 --with-abi=64 --with-endian=big"
+# Target mips3 for maximum 64-bit compatibility
+# but many modern configure tools expect
+# mips64-linux-gnu as the triplet.
+export TARGET="mips64-linux-gnu"
+
+# Target mips3 for widest 64-bit compatibility.
+export TARGET_CFLAGS="-march=mips3 -mabi=64 -mbig-endian"
+export TARGET_CONFIGURE_FLAGS="--with-arch=mips3 --with-abi=64 --with-endian=big"
 
 # Work directories
 export CWORK="$HOME/sysroot/${TARGET}"
