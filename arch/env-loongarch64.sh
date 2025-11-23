@@ -18,8 +18,8 @@ export SYSROOT="$CWORK/sysroot"
 export HEADER_DIR="${CWORK}/${TARGET}"
 
 # Pkg versions
-export BINUTILSV=binutils-2.44
-export GCCV=gcc-15.1.0
+export BINUTILSV=binutils-2.38
+export GCCV=gcc-12.1.0
 export GLIBCV=glibc-2.36
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
 export LINUXV=linux-5.19
