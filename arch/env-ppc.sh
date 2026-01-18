@@ -20,7 +20,7 @@ export HEADER_DIR="${CWORK}/${TARGET}"
 # Pkg versions
 export BINUTILSV=binutils-2.31.1
 export GCCV=gcc-9.5.0
-export GLIBCV=glibc-2.28
+export GLIBCV=glibc-2.24
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
 export LINUXV=linux-4.19
 export LINUXMIN=2.6.9
