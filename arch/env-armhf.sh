@@ -6,8 +6,8 @@ export LINUX_ARCH="arm"
 
 # Target flags for GCC abi consistency
 # if not defined, then it uses defaults
-export TARGET_CFLAGS="-march=armv7-a -mthumb -mfpu=neon-vfpv4 -mfloat-abi=hard"
-export TARGET_CONFIGURE_FLAGS="--with-arch=armv7-a --with-mode=thumb --with-float=hard --with-fpu=neon-vfpv4 --with-float-abi=hard"
+export TARGET_CFLAGS="-march=armv7-a -mthumb -mfpu=vfpv3-d16 -mfloat-abi=hard"
+export TARGET_CONFIGURE_FLAGS="--with-arch=armv7-a --with-mode=thumb --with-float=hard --with-fpu=vfpv3-d16 --with-float-abi=hard"
 
 # Work directories
 export CWORK="$HOME/sysroot/${TARGET}"

@@ -6,7 +6,7 @@ export LINUX_ARCH="powerpc"
 
 # Target flags for GCC abi consistency
 # if not defined, then it uses defaults
-export TARGET_CFLAGS="-mcpu=powerpc64 -mbig"
+export TARGET_CFLAGS="-mcpu=powerpc64 -mbig -mno-altivec"
 export TARGET_CONFIGURE_FLAGS="--with-cpu=powerpc64 --with-abi=elfv1 --enable-secureplt --disable-altivec --with-long-double-64"
 
 # Work directories
