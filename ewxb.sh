@@ -397,6 +397,35 @@ phase_4() {
     
     make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT || return 1
 
+    if [[ $TARGET == "hppa-linux-gnu" ]]; then
+        local errno_header="$SYSROOT/usr/include/bits/errno.h"
+
+        # Verify the file exists before attempting to patch
+        if [ -f "$errno_header" ]; then
+            log "Applying HPPA patch to $errno_header..."
+
+            # Use 'grep' to check if we already patched it (idempotency check)
+            if ! grep -q "PA-RISC specific definitions" "$errno_header"; then
+                cat >> "$errno_header" <<EOF
+
+/* PA-RISC specific definitions for C++17 filesystem support (Auto-Patched) */
+#ifndef ENOTSUP
+# define ENOTSUP 252
+#endif
+
+#ifndef EOPNOTSUPP
+# define EOPNOTSUPP 226
+#endif
+EOF
+                log "Patch applied successfully."
+            else
+                log "Header already patched, skipping."
+            fi
+        else
+            log "WARNING: Could not find $errno_header to patch! libstdc++ may fail later."
+        fi
+    fi
+
     mkdir -p $SYSROOT/usr/lib
     make $PARALLEL_MAKE csu/subdir_lib || return 1
     cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib || return 1
@@ -508,6 +537,35 @@ phase_6() {
             --with-tls \
             $extra_config_opts \
             libc_cv_forced_unwind=yes || return 1
+    elif [[ $TARGET == "hppa-linux-gnu" ]]; then
+        # Older GLIBC places some variables in the `COMMON` section,
+        # with binutils 2.31 seems to reject.
+        # This flags places them in the `BBS` section to keep the
+        # linker happy.
+        # We also manually define these falgs to make GLIBC itself happy.
+        CFLAGS="-O2 -fno-common -DENOTSUP=252 -DEOPNOTSUPP=226" \
+        CXXFLAGS="-O2 -fno-common -DENOTSUP=252 -DEOPNOTSUPP=226" \
+        BUILD_CC=gcc \
+        CC=$TOOLS/bin/$TARGET-gcc \
+        CXX=$TOOLS/bin/$TARGET-g++ \
+        AR=$TOOLS/bin/$TARGET-ar \
+        RANLIB=$TOOLS/bin/$TARGET-ranlib \
+        $SRC/$GLIBCV/configure \
+            --prefix=/usr \
+            --build=$BUILD \
+            --host=$TARGET \
+            --with-headers=$SYSROOT/usr/include \
+            --disable-werror \
+            --with-binutils=$TOOLS/$TARGET/bin \
+            $addons \
+            --enable-kernel="$linux_version" \
+            --disable-profile \
+            --without-gd \
+            --without-cvs \
+            --with-tls \
+            $extra_config_opts \
+            libc_cv_forced_unwind=yes || return 1
+
     else
         BUILD_CC=gcc \
         CC=$TOOLS/bin/$TARGET-gcc \
@@ -541,26 +599,52 @@ phase_7() {
     ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/gcc3"
-    $SRC/$GCCV/configure \
-        --prefix=$TOOLS \
-        --target=$TARGET \
-        --build=$BUILD \
-        --host=$HOST \
-        --with-sysroot=$SYSROOT \
-        --enable-languages=c,c++,lto \
-        --disable-multilib \
-        --disable-libssp \
-        --disable-libgomp \
-        --disable-libmudflap \
-        --disable-libquadmath \
-        --disable-libquadmath-support \
-        --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-        --with-ppl=no \
-        --with-isl=no \
-        --with-cloog=no \
-        --with-libelf=no \
-        $TARGET_CONFIGURE_FLAGS || return 1
+    if [[ $TARGET == "hppa-linux-gnu" ]]; then
+        # We need these defines specifically for libstdc++ (C++) and libgcc (C)
+        export CFLAGS_FOR_TARGET="-O2 -DENOTSUP=252 -DEOPNOTSUPP=226"
+        export CXXFLAGS_FOR_TARGET="-O2 -DENOTSUP=252 -DEOPNOTSUPP=226"
 
+        $SRC/$GCCV/configure \
+            --prefix=$TOOLS \
+            --target=$TARGET \
+            --build=$BUILD \
+            --host=$HOST \
+            --with-sysroot=$SYSROOT \
+            --enable-languages=c,c++,lto \
+            --disable-multilib \
+            --disable-libssp \
+            --disable-libgomp \
+            --disable-libmudflap \
+            --disable-libquadmath \
+            --disable-libquadmath-support \
+            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+            --with-ppl=no \
+            --with-isl=no \
+            --with-cloog=no \
+            --with-libelf=no \
+            $TARGET_CONFIGURE_FLAGS || return 1
+
+    else
+        $SRC/$GCCV/configure \
+            --prefix=$TOOLS \
+            --target=$TARGET \
+            --build=$BUILD \
+            --host=$HOST \
+            --with-sysroot=$SYSROOT \
+            --enable-languages=c,c++,lto \
+            --disable-multilib \
+            --disable-libssp \
+            --disable-libgomp \
+            --disable-libmudflap \
+            --disable-libquadmath \
+            --disable-libquadmath-support \
+            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+            --with-ppl=no \
+            --with-isl=no \
+            --with-cloog=no \
+            --with-libelf=no \
+            $TARGET_CONFIGURE_FLAGS || return 1
+    fi
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
     
