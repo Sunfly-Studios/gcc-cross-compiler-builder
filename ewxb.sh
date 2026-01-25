@@ -367,6 +367,7 @@ phase_4() {
             --without-gd \
             --without-cvs \
             --with-tls \
+            --disable-multi-arch \
             $extra_config_opts \
             libc_cv_forced_unwind=yes || return 1
     else
@@ -388,6 +389,7 @@ phase_4() {
             --without-gd \
             --without-cvs \
             --with-tls \
+            --disable-multi-arch \
             libc_cv_ctors_header=yes \
             libc_cv_gcc_builtin_expect=yes \
             libc_cv_mips_tls=yes \
@@ -535,6 +537,7 @@ phase_6() {
             --without-gd \
             --without-cvs \
             --with-tls \
+            --disable-multi-arch \
             $extra_config_opts \
             libc_cv_forced_unwind=yes || return 1
     elif [[ $TARGET == "hppa-linux-gnu" ]]; then
@@ -563,6 +566,7 @@ phase_6() {
             --without-gd \
             --without-cvs \
             --with-tls \
+            --disable-multi-arch \
             $extra_config_opts \
             libc_cv_forced_unwind=yes || return 1
 
@@ -583,6 +587,7 @@ phase_6() {
             --with-binutils=$TOOLS/$TARGET/bin \
             $addons \
             --enable-kernel="$linux_version" \
+            --disable-multi-arch \
             libc_cv_forced_unwind=yes \
             $extra_lib_cv || return 1
     fi
