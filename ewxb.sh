@@ -399,35 +399,6 @@ phase_4() {
     
     make $PARALLEL_MAKE install-headers install-bootstrap-headers=yes install_root=$SYSROOT || return 1
 
-    if [[ $TARGET == "hppa-linux-gnu" ]]; then
-        local errno_header="$SYSROOT/usr/include/bits/errno.h"
-
-        # Verify the file exists before attempting to patch
-        if [ -f "$errno_header" ]; then
-            log "Applying HPPA patch to $errno_header..."
-
-            # Use 'grep' to check if we already patched it (idempotency check)
-            if ! grep -q "PA-RISC specific definitions" "$errno_header"; then
-                cat >> "$errno_header" <<EOF
-
-/* PA-RISC specific definitions for C++17 filesystem support (Auto-Patched) */
-#ifndef ENOTSUP
-# define ENOTSUP 252
-#endif
-
-#ifndef EOPNOTSUPP
-# define EOPNOTSUPP 226
-#endif
-EOF
-                log "Patch applied successfully."
-            else
-                log "Header already patched, skipping."
-            fi
-        else
-            log "WARNING: Could not find $errno_header to patch! libstdc++ may fail later."
-        fi
-    fi
-
     mkdir -p $SYSROOT/usr/lib
     make $PARALLEL_MAKE csu/subdir_lib || return 1
     cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib || return 1
@@ -439,6 +410,59 @@ EOF
     $TOOLS/bin/$TARGET-gcc -nostdlib -nostartfiles -shared -x c /dev/null -o $SYSROOT/usr/lib/libc.so
 
     touch $SYSROOT/usr/include/gnu/stubs.h
+
+    if [[ $TARGET == "hppa-linux-gnu" ]]; then
+        local files_to_patch=(
+            "$SYSROOT/usr/include/bits/errno.h"
+            "$SYSROOT/usr/include/errno.h"
+            "$SYSROOT/usr/include/asm/errno.h"
+        )
+        local patch_text='
+/* PA-RISC specific definitions for C++17 filesystem support (Auto-Patched) */
+#ifndef ENOTSUP
+# define ENOTSUP 252
+#endif
+
+#ifndef EOPNOTSUPP
+# define EOPNOTSUPP 226
+#endif'
+
+        for header in "${files_to_patch[@]}"; do
+            # Verify file exists
+            if [ -f "$header" ]; then
+
+                # Idempotency check: Don't patch if already patched
+                if ! grep -q "PA-RISC specific definitions" "$header"; then
+                    log "Applying HPPA patch to $header..."
+
+                    # SPECIAL CASE: asm/errno.h
+                    # We need to insert inside the #ifdef guard, i.e., before the last line (#endif)
+                    if [[ "$header" == *"asm/errno.h" ]]; then
+                        # Capture the last line (usually #endif or #endif /* ... */)
+                        local last_line
+                        last_line=$(tail -n 1 "$header")
+
+                        # Remove the last line from the file using sed
+                        sed -i '$d' "$header"
+
+                        # Append patch, then restore the last line
+                        echo "$patch_text" >> "$header"
+                        echo "$last_line" >> "$header"
+
+                    else
+                        # STANDARD CASE: Simply append to the end
+                        echo "$patch_text" >> "$header"
+                    fi
+
+                    log "Patch applied successfully."
+                else
+                    log "Header $header already patched, skipping."
+                fi
+            else
+                log "WARNING: Could not find $header to patch! libstdc++ may fail later."
+            fi
+        done
+    fi
 
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_old"
     return 0
@@ -542,12 +566,12 @@ phase_6() {
             libc_cv_forced_unwind=yes || return 1
     elif [[ $TARGET == "hppa-linux-gnu" ]]; then
         # Older GLIBC places some variables in the `COMMON` section,
-        # with binutils 2.31 seems to reject.
+        # which binutils 2.31 seems to reject.
         # This flags places them in the `BBS` section to keep the
         # linker happy.
         # We also manually define these falgs to make GLIBC itself happy.
-        CFLAGS="-O2 -fno-common -DENOTSUP=252 -DEOPNOTSUPP=226" \
-        CXXFLAGS="-O2 -fno-common -DENOTSUP=252 -DEOPNOTSUPP=226" \
+        CFLAGS="-O2 -fno-common" \
+        CXXFLAGS="-O2 -fno-common" \
         BUILD_CC=gcc \
         CC=$TOOLS/bin/$TARGET-gcc \
         CXX=$TOOLS/bin/$TARGET-g++ \
@@ -569,7 +593,6 @@ phase_6() {
             --disable-multi-arch \
             $extra_config_opts \
             libc_cv_forced_unwind=yes || return 1
-
     else
         BUILD_CC=gcc \
         CC=$TOOLS/bin/$TARGET-gcc \
@@ -604,52 +627,25 @@ phase_7() {
     ensure_tools_in_path
 
     setup_and_enter_dir "$OBJ/gcc3"
-    if [[ $TARGET == "hppa-linux-gnu" ]]; then
-        # We need these defines specifically for libstdc++ (C++) and libgcc (C)
-        export CFLAGS_FOR_TARGET="-O2 -DENOTSUP=252 -DEOPNOTSUPP=226"
-        export CXXFLAGS_FOR_TARGET="-O2 -DENOTSUP=252 -DEOPNOTSUPP=226"
-
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --enable-languages=c,c++,lto \
-            --disable-multilib \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no \
-            $TARGET_CONFIGURE_FLAGS || return 1
-
-    else
-        $SRC/$GCCV/configure \
-            --prefix=$TOOLS \
-            --target=$TARGET \
-            --build=$BUILD \
-            --host=$HOST \
-            --with-sysroot=$SYSROOT \
-            --enable-languages=c,c++,lto \
-            --disable-multilib \
-            --disable-libssp \
-            --disable-libgomp \
-            --disable-libmudflap \
-            --disable-libquadmath \
-            --disable-libquadmath-support \
-            --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
-            --with-ppl=no \
-            --with-isl=no \
-            --with-cloog=no \
-            --with-libelf=no \
-            $TARGET_CONFIGURE_FLAGS || return 1
-    fi
+    $SRC/$GCCV/configure \
+        --prefix=$TOOLS \
+        --target=$TARGET \
+        --build=$BUILD \
+        --host=$HOST \
+        --with-sysroot=$SYSROOT \
+        --enable-languages=c,c++,lto \
+        --disable-multilib \
+        --disable-libssp \
+        --disable-libgomp \
+        --disable-libmudflap \
+        --disable-libquadmath \
+        --disable-libquadmath-support \
+        --with-pkgversion="${USER}'s $TARGET GCC phase3 cross-compiler" \
+        --with-ppl=no \
+        --with-isl=no \
+        --with-cloog=no \
+        --with-libelf=no \
+        $TARGET_CONFIGURE_FLAGS || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE || return 1
     PATH="$TOOLS/bin:$PATH" make $PARALLEL_MAKE install || return 1
     
@@ -661,6 +657,68 @@ phase_7() {
             ln -sf "$file" "$tool_name"
         fi
     done
+
+    if [[ $TARGET == "hppa-linux-gnu" ]]; then
+        # When upgrading to newer toolchains, it sets the
+        # RELRO flag enabled. This can break programs and the dynamic linker
+        # when running under emulation (QEMU) and we suspect on real
+        # hardware too.
+        # So this basically patches it out to NOP (NULL).
+        log "Patching ld.so.1 for modern toolchains."
+
+        # Back up.
+        cp "$SYSROOT/lib/ld.so.1" "$SYSROOT/lib/ld.so.1.bak"
+
+        python3 -c '
+import sys, struct
+
+# Get the file path from the first argument
+target_file = sys.argv[1]
+
+PT_GNU_RELRO = 0x6474e552
+PT_NULL = 0
+
+try:
+    with open(target_file, "r+b") as f:
+        elf = bytearray(f.read())
+
+        # Determine endianness based on EI_DATA (byte 5)
+        # 1 = Little Endian (<), 2 = Big Endian (>)
+        endian = "<" if elf[5] == 1 else ">"
+
+        # Find the offset of the program header table
+        phoff = struct.unpack_from(f"{endian}I", elf, 28)[0]
+        phnum = struct.unpack_from(f"{endian}H", elf, 44)[0]
+        phentsize = struct.unpack_from(f"{endian}H", elf, 42)[0]
+
+        found = False
+        for i in range(phnum):
+            offset = phoff + (i * phentsize)
+            p_type = struct.unpack_from(f"{endian}I", elf, offset)[0]
+
+            if p_type == PT_GNU_RELRO:
+                print(f"Found RELRO header at index {i}, patching to PT_NULL...")
+                # Update the in-memory buffer
+                struct.pack_into(f"{endian}I", elf, offset, PT_NULL)
+
+                # Write changes back to file
+                f.seek(0)
+                f.write(elf)
+                found = True
+                break
+
+        if not found:
+            print("No RELRO header found.")
+
+except Exception as e:
+    print(f"Error patching ELF: {e}")
+    sys.exit(1)
+
+' "$SYSROOT/lib/ld.so.1"
+        log "Patched ld.so.1"
+    fi
+
+    return 0
     return 0
 }
 

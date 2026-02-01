@@ -20,6 +20,9 @@ export HEADER_DIR="${CWORK}/${TARGET}"
 # Pkg versions
 export BINUTILSV=binutils-2.31.1
 export GCCV=gcc-9.5.0
+
+# We use 2.24 instead of 2.21-2.19 because
+# by 2.24 they "figured it out" for HPPA.
 export GLIBCV=glibc-2.24
 export GLIBCVNO=$(echo $GLIBCV | sed -e 's/.*-\([[:digit:]]\)/\1/')
 export LINUXV=linux-4.19
